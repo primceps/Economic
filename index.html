@@ -1,0 +1,714 @@
+import { useState, useCallback } from "react";
+
+const TABS = ["프로젝트 기본정보", "수요 데이터", "에너지원 선택", "재무 설정", "경제성 분석 결과"];
+
+// 용도지역 법규 데이터 (국토의 계획 및 이용에 관한 법률)
+const ZONE_REGULATIONS = {
+  "제1종전용주거": { bcr: 50, far: 100, desc: "단독주택 중심" },
+  "제2종전용주거": { bcr: 50, far: 150, desc: "공동주택 중심" },
+  "제1종일반주거": { bcr: 60, far: 200, desc: "저층주거 중심" },
+  "제2종일반주거": { bcr: 60, far: 250, desc: "중층주거 중심" },
+  "제3종일반주거": { bcr: 50, far: 300, desc: "중고층주거 중심" },
+  "준주거": { bcr: 70, far: 500, desc: "주거+상업 혼합" },
+  "중심상업": { bcr: 90, far: 1500, desc: "도심·부도심 상업" },
+  "일반상업": { bcr: 80, far: 1300, desc: "일반 상업·업무" },
+  "근린상업": { bcr: 70, far: 900, desc: "근린 상업·업무" },
+  "유통상업": { bcr: 80, far: 1100, desc: "도·소매 유통" },
+  "전용공업": { bcr: 70, far: 300, desc: "중화학 공업" },
+  "일반공업": { bcr: 70, far: 350, desc: "환경저해 없는 공업" },
+  "준공업": { bcr: 70, far: 400, desc: "경공업+주거·상업" },
+  "보전녹지": { bcr: 20, far: 80, desc: "자연환경 보전" },
+  "생산녹지": { bcr: 20, far: 100, desc: "농업생산 보전" },
+  "자연녹지": { bcr: 20, far: 100, desc: "자연환경 보전" },
+};
+
+const BUILDING_TYPES = {
+  "주거": {
+    sub: ["단독주택", "다가구주택", "연립주택(빌라)", "아파트", "오피스텔"],
+    icon: "🏠",
+    unitPower: { "단독주택": 65, "다가구주택": 75, "연립주택(빌라)": 80, "아파트": 90, "오피스텔": 130 },
+    unitHeat: { "단독주택": 100, "다가구주택": 110, "연립주택(빌라)": 115, "아파트": 120, "오피스텔": 90 },
+  },
+  "상업": {
+    sub: ["중심상업(백화점/쇼핑몰)", "일반상업(근린상가)", "근린상업(편의점/음식점)", "유통상업(물류/창고)"],
+    icon: "🏪",
+    unitPower: { "중심상업(백화점/쇼핑몰)": 350, "일반상업(근린상가)": 200, "근린상업(편의점/음식점)": 280, "유통상업(물류/창고)": 80 },
+    unitHeat: { "중심상업(백화점/쇼핑몰)": 120, "일반상업(근린상가)": 100, "근린상업(편의점/음식점)": 150, "유통상업(물류/창고)": 50 },
+  },
+  "업무": {
+    sub: ["일반업무(오피스)", "지식산업센터", "공공청사", "금융기관"],
+    icon: "🏢",
+    unitPower: { "일반업무(오피스)": 180, "지식산업센터": 200, "공공청사": 160, "금융기관": 220 },
+    unitHeat: { "일반업무(오피스)": 130, "지식산업센터": 120, "공공청사": 140, "금융기관": 110 },
+  },
+  "공업": {
+    sub: ["전용공업(중화학)", "일반공업(제조)", "준공업(경공업)"],
+    icon: "🏭",
+    unitPower: { "전용공업(중화학)": 500, "일반공업(제조)": 350, "준공업(경공업)": 200 },
+    unitHeat: { "전용공업(중화학)": 300, "일반공업(제조)": 200, "준공업(경공업)": 120 },
+  },
+  "복합": {
+    sub: ["주거+상업 복합", "주거+업무 복합", "상업+업무 복합", "주상복합(전체)"],
+    icon: "🏗️",
+    unitPower: { "주거+상업 복합": 150, "주거+업무 복합": 130, "상업+업무 복합": 200, "주상복합(전체)": 160 },
+    unitHeat: { "주거+상업 복합": 110, "주거+업무 복합": 120, "상업+업무 복합": 115, "주상복합(전체)": 120 },
+  },
+};
+
+const USAGE_TYPES = ["음식점", "편의점", "카페", "지식산업센터", "병원/의원", "학원", "어린이집", "주차장", "근린생활시설", "판매시설", "숙박시설", "문화집회시설"];
+
+const ENERGY_SOURCES = [
+  { id: "solar_pv", label: "태양광(PV)", icon: "☀️", unit: "kWp", defaultCost: 1500000, defaultEff: 0.17, lifespan: 25 },
+  { id: "wind", label: "풍력", icon: "💨", unit: "kW", defaultCost: 2000000, defaultEff: 0.35, lifespan: 20 },
+  { id: "solar_thermal", label: "태양열", icon: "🌡️", unit: "m²", defaultCost: 600000, defaultEff: 0.50, lifespan: 20 },
+  { id: "small_hydro", label: "소수력", icon: "💧", unit: "kW", defaultCost: 3000000, defaultEff: 0.80, lifespan: 30 },
+  { id: "geothermal", label: "지열히트펌프", icon: "🌍", unit: "kW", defaultCost: 2500000, defaultEff: 4.0, lifespan: 20 },
+  { id: "battery", label: "ESS(배터리)", icon: "🔋", unit: "kWh", defaultCost: 600000, defaultEff: 0.92, lifespan: 15 },
+];
+
+const SUPPORT_POLICIES = [
+  {
+    id: "fit", label: "FIT", fullName: "발전차액지원제도",
+    desc: "신재생에너지 발전 전력을 기준가격과 시장가격의 차액만큼 정부가 보전해주는 제도입니다. 소규모 신재생에너지 발전사업자의 수익을 안정화하기 위해 운영됩니다.",
+    detail: "• 대상: 소규모 신재생에너지 발전설비 (태양광, 풍력, 소수력 등)\n• 기준가격: 에너지원별 상이 (태양광 약 150~200원/kWh)\n• 지원기간: 20년\n• 근거법: 신에너지 및 재생에너지 개발·이용·보급 촉진법",
+    inputLabel: "FIT 지원단가", inputUnit: "원/kWh", defaultVal: 180, field: "fitRate",
+  },
+  {
+    id: "rps", label: "RPS/REC", fullName: "신재생에너지 공급의무화(RPS) 및 공급인증서(REC)",
+    desc: "500MW 이상 발전사업자에게 총 발전량의 일정 비율을 신재생에너지로 공급하도록 의무화하고, 신재생에너지 공급인증서(REC)를 통해 거래가 이루어지는 제도입니다.",
+    detail: "• 대상: 500MW 이상 발전사업자 (의무공급자)\n• REC 가중치: 태양광 1.2, 풍력 1.0, 수력 1.0, 바이오 1.0\n• 거래방식: 현물시장, 계약시장\n• 근거법: 신에너지 및 재생에너지 개발·이용·보급 촉진법 제12조",
+    inputLabel: "REC 가중치", inputUnit: "배", defaultVal: 1.2, field: "recMultiplier",
+  },
+  {
+    id: "ets", label: "ETS", fullName: "배출권거래제(Emissions Trading Scheme)",
+    desc: "온실가스 배출 허용량을 초과하는 기업이 여유분을 보유한 기업으로부터 배출권을 구매할 수 있는 시장 기반 제도입니다. 신재생에너지 도입으로 감축한 CO₂량을 배출권으로 판매할 수 있습니다.",
+    detail: "• 대상: 온실가스 다배출 기업 (연간 125,000tCO₂ 이상)\n• 거래단가: 10,000~25,000원/tCO₂\n• 감축 인정: 재생에너지 도입에 의한 전력 소비 감소분\n• 근거법: 온실가스 배출권의 할당 및 거래에 관한 법률",
+    inputLabel: "CO₂ 배출권 가격", inputUnit: "원/tCO₂", defaultVal: 15000, field: "co2Price",
+  },
+  {
+    id: "greendeal", label: "그린뉴딜", fullName: "한국판 그린뉴딜 보조금",
+    desc: "탄소중립 실현을 위한 정부의 그린뉴딜 정책으로, 공공건물 및 노후 건축물의 그린 리모델링, 스마트 그린산단 조성 등에 보조금을 지원합니다.",
+    detail: "• 그린 리모델링: 공공건물 에너지 성능 개선 비용의 50~70% 지원\n• 제로에너지 건축물: 인증 취득 시 용적률 완화 (최대 15%)\n• 지원기관: 국토교통부, 산업통상자원부\n• 근거법: 녹색건축물 조성 지원법",
+    inputLabel: "투자보조금 비율", inputUnit: "%", defaultVal: 20, field: "subsidyRate",
+  },
+  {
+    id: "zero_energy", label: "ZEB 인증", fullName: "제로에너지건축물(ZEB) 인증 혜택",
+    desc: "건축물 에너지 자립률 기준에 따라 1~5등급으로 인증하며, 인증 취득 시 용적률·건폐율 완화, 세제 혜택 등을 제공합니다.",
+    detail: "• 1등급: 에너지 자립률 100% 이상\n• 2등급: 80% 이상\n• 3등급: 60% 이상\n• 4등급: 40% 이상\n• 5등급: 20% 이상\n• 혜택: 용적률 최대 15% 완화, 취득세·재산세 감면(5~15%)\n• 근거법: 녹색건축물 조성 지원법 제17조",
+    inputLabel: "세제 감면율", inputUnit: "%", defaultVal: 10, field: "zebDiscount",
+  },
+  {
+    id: "smp", label: "SMP 판매", fullName: "계통한계가격(SMP) 전력 판매",
+    desc: "신재생에너지로 생산한 잉여 전력을 전력시장의 계통한계가격(SMP)으로 판매할 수 있습니다. 상업용 태양광 방식이 자가용 대비 수익에 유리합니다.",
+    detail: "• SMP 단가: 시장 형성 가격 (통상 70~100원/kWh)\n• 판매 대상: 전력시장 등록 발전사업자\n• 정산 방식: 시간대별 전력 판매량 × SMP\n• 근거법: 전기사업법",
+    inputLabel: "SMP 단가", inputUnit: "원/kWh", defaultVal: 80, field: "smpPrice",
+  },
+  {
+    id: "tax_deduction", label: "세액공제", fullName: "신재생에너지 투자세액공제",
+    desc: "신재생에너지 설비 투자에 대해 법인세·소득세를 일정 비율 공제해주는 세제 혜택입니다.",
+    detail: "• 공제율: 중소기업 30%, 중견기업 15%, 대기업 10%\n• 적용 설비: 태양광, 풍력, 연료전지, ESS 등\n• 공제방식: 해당 연도 법인세/소득세에서 직접 차감\n• 근거법: 조세특례제한법 제25조의2",
+    inputLabel: "세액공제율", inputUnit: "%", defaultVal: 10, field: "taxCredit",
+  },
+  {
+    id: "loan", label: "정책금융", fullName: "신재생에너지 정책 저리 융자",
+    desc: "산업통상자원부 및 에너지공단에서 신재생에너지 설치 사업자에게 시중금리보다 낮은 이율로 장기 융자를 지원합니다.",
+    detail: "• 융자 한도: 설치비의 90% 이내\n• 금리: 연 1.75~2.5% (고정금리)\n• 상환 기간: 최대 15년 (3년 거치 포함)\n• 지원기관: 한국에너지공단\n• 근거법: 신에너지 및 재생에너지 개발·이용·보급 촉진법 제27조",
+    inputLabel: "정책융자 이자율", inputUnit: "%", defaultVal: 2.0, field: "policyLoanRate",
+  },
+];
+
+const DISCOUNT_RATE_REFS = [
+  { label: "한국은행 기준금리", value: 3.5 },
+  { label: "공공투자사업 사회적 할인율(KDI)", value: 5.5 },
+  { label: "민간 신재생에너지 사업 평균", value: 6.5 },
+  { label: "정부 에너지 사업 권고치", value: 4.5 },
+];
+
+function InputField({ label, value, onChange, type = "number", unit, min, max, step, hint, refVal }) {
+  return (
+    <div style={{ marginBottom: 13 }}>
+      <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 3, fontWeight: 600 }}>{label}</label>
+      {refVal !== undefined && (
+        <div style={{ fontSize: 10, color: "#3b82f6", marginBottom: 3 }}>참고값: {refVal}</div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <input type={type} value={value}
+          onChange={e => onChange(type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)}
+          min={min} max={max} step={step || 1}
+          style={{ flex: 1, padding: "7px 10px", borderRadius: 7, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#f8fafc", outline: "none" }} />
+        {unit && <span style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>{unit}</span>}
+      </div>
+      {hint && <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>{hint}</div>}
+    </div>
+  );
+}
+
+function Card({ title, children, color = "#3b82f6" }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px #0001", marginBottom: 16, overflow: "hidden" }}>
+      <div style={{ background: color, color: "#fff", padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>{title}</div>
+      <div style={{ padding: 14 }}>{children}</div>
+    </div>
+  );
+}
+
+function ResultMetric({ label, value, unit, color = "#3b82f6", sub }) {
+  return (
+    <div style={{ background: "#f8fafc", borderRadius: 10, padding: "10px 12px", border: `2px solid ${color}20` }}>
+      <div style={{ fontSize: 10, color: "#64748b", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
+      <div style={{ fontSize: 10, color: "#94a3b8" }}>{unit}{sub ? ` · ${sub}` : ""}</div>
+    </div>
+  );
+}
+
+function BarChart({ data, title, color = "#3b82f6" }) {
+  const max = Math.max(...data.map(d => d.value), 1);
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 8 }}>{title}</div>
+      {data.map((d, i) => (
+        <div key={i} style={{ marginBottom: 7 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#64748b", marginBottom: 2 }}>
+            <span>{d.label}</span><span style={{ fontWeight: 700 }}>{d.value.toLocaleString()}{d.unit || ""}</span>
+          </div>
+          <div style={{ height: 9, background: "#e2e8f0", borderRadius: 5, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${(d.value / max) * 100}%`, background: color, borderRadius: 5 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Policy Popup
+function PolicyPopup({ policy, onClose }) {
+  if (!policy) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#0008", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 14, maxWidth: 420, width: "100%", overflow: "hidden", boxShadow: "0 20px 60px #0004" }} onClick={e => e.stopPropagation()}>
+        <div style={{ background: "linear-gradient(135deg, #1e3a5f, #3b82f6)", color: "#fff", padding: "14px 16px" }}>
+          <div style={{ fontSize: 11, opacity: 0.8, marginBottom: 2 }}>{policy.label}</div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{policy.fullName}</div>
+        </div>
+        <div style={{ padding: 16 }}>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, marginBottom: 14 }}>{policy.desc}</p>
+          <div style={{ background: "#f0f9ff", borderRadius: 8, padding: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 6 }}>📋 상세 내용</div>
+            <pre style={{ fontSize: 11, color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.7, margin: 0, fontFamily: "inherit" }}>{policy.detail}</pre>
+          </div>
+        </div>
+        <div style={{ padding: "0 16px 16px" }}>
+          <button onClick={onClose} style={{ width: "100%", padding: 10, background: "#1e3a5f", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>닫기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [tab, setTab] = useState(0);
+  const [popup, setPopup] = useState(null);
+
+  // 1단계
+  const [project, setProject] = useState({
+    name: "구도심 재생에너지 사업", address: "서울특별시", zone: "제2종일반주거",
+    mainType: "주거", subType: "아파트",
+    newArea: 3000, extArea: 500, totalArea: 3500,
+    floors: 15, units: 200, landArea: 500,
+    usages: [], customUsage: "",
+  });
+
+  // 2단계
+  const [demand, setDemand] = useState({
+    annualKwh: 0, peakKw: 0, heatDemand: 0, growthRate: 2.5, kepcoRate: 120,
+    demandScenario: "standard",
+  });
+  const [demandLocked, setDemandLocked] = useState(false);
+
+  // 3단계
+  const [sources, setSources] = useState(
+    ENERGY_SOURCES.reduce((acc, s) => ({ ...acc, [s.id]: { enabled: false, capacity: 100, cost: s.defaultCost, eff: s.defaultEff } }), {})
+  );
+
+  // 4단계
+  const [finance, setFinance] = useState({
+    discountRate: 5.5, inflation: 2.5, projectLife: 20, debtRatio: 70,
+    debtRate: 3.5, debtPeriod: 10, omRate: 1.5,
+    smpPrice: 80, recMultiplier: 1.2, co2Price: 15000, subsidyRate: 20,
+    fitRate: 180, zebDiscount: 10, taxCredit: 10, policyLoanRate: 2.0,
+    enabledPolicies: {},
+  });
+
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const setP = (k, v) => setProject(p => ({ ...p, [k]: v }));
+  const setD = (k, v) => setDemand(d => ({ ...d, [k]: v }));
+  const setF = (k, v) => setFinance(f => ({ ...f, [k]: v }));
+  const setSrc = (id, k, v) => setSources(s => ({ ...s, [id]: { ...s[id], [k]: v } }));
+
+  const zoneInfo = ZONE_REGULATIONS[project.zone] || {};
+  const typeInfo = BUILDING_TYPES[project.mainType] || {};
+
+  // 1단계 → 2단계 수요 예측
+  const estimateDemand = useCallback(() => {
+    const uPow = typeInfo.unitPower?.[project.subType] || 100;
+    const uHeat = typeInfo.unitHeat?.[project.subType] || 100;
+    const area = project.totalArea || project.newArea;
+    const scenarioMult = { low: 0.8, standard: 1.0, high: 1.25 };
+    const mult = scenarioMult[demand.demandScenario] || 1.0;
+    const estPow = Math.round(area * uPow * mult);
+    const estHeat = Math.round(area * uHeat * mult * 0.8);
+    const peak = Math.round(area * 0.05 * mult);
+    setDemand(d => ({ ...d, annualKwh: estPow, heatDemand: estHeat, peakKw: peak }));
+    setDemandLocked(true);
+  }, [project, demand.demandScenario, typeInfo]);
+
+  const analyze = useCallback(() => {
+    setLoading(true);
+    setTimeout(() => {
+      const enabledSrcs = ENERGY_SOURCES.filter(s => sources[s.id].enabled);
+      const annualDemand = demand.annualKwh;
+      let totalAnnualGen = 0, totalInvestment = 0;
+      const sourceDetails = [];
+
+      enabledSrcs.forEach(s => {
+        const cfg = sources[s.id];
+        let annualGen = 0;
+        const investCost = cfg.capacity * cfg.cost * (1 - finance.subsidyRate / 100);
+        if (s.id === "solar_pv") annualGen = cfg.capacity * cfg.eff * 1400;
+        else if (s.id === "wind") annualGen = cfg.capacity * cfg.eff * 8760 * 0.25;
+        else if (s.id === "solar_thermal") annualGen = cfg.capacity * cfg.eff * 1200 / 3.6;
+        else if (s.id === "small_hydro") annualGen = cfg.capacity * cfg.eff * 8760 * 0.45;
+        else if (s.id === "geothermal") annualGen = cfg.capacity * cfg.eff * 8760 * 0.6;
+        else if (s.id === "battery") annualGen = cfg.capacity * cfg.eff * 250;
+        totalAnnualGen += annualGen;
+        totalInvestment += investCost;
+        sourceDetails.push({ name: s.label, icon: s.icon, annualGen: Math.round(annualGen), capacity: cfg.capacity, investCost: Math.round(investCost), unit: s.unit });
+      });
+
+      const selfSufficiency = Math.min((totalAnnualGen / annualDemand) * 100, 100);
+      const supplyCovered = Math.min(totalAnnualGen, annualDemand);
+      const surplus = Math.max(totalAnnualGen - annualDemand, 0);
+
+      const kepcoAnnualCost = annualDemand * (demand.kepcoRate / 1000);
+      const kepcoLifetimeCost = Array.from({ length: finance.projectLife }, (_, i) =>
+        kepcoAnnualCost * Math.pow(1 + demand.growthRate / 100, i) / Math.pow(1 + finance.discountRate / 100, i)
+      ).reduce((a, b) => a + b, 0);
+
+      const annualOMCost = totalInvestment * (finance.omRate / 100);
+      const annualSaving = supplyCovered * (demand.kepcoRate / 1000);
+      const annualSmpRevenue = sources["battery"]?.enabled
+        ? surplus * (finance.smpPrice / 1000) * 0.9
+        : surplus * (finance.smpPrice / 1000);
+      const annualRecRevenue = surplus * (finance.smpPrice * finance.recMultiplier / 1000);
+      const annualCo2Saving = totalAnnualGen * 0.4597 * (finance.co2Price / 1000000);
+      const annualFitRevenue = finance.enabledPolicies["fit"] ? totalAnnualGen * finance.fitRate / 1000 : 0;
+      const taxCreditBenefit = finance.enabledPolicies["tax_deduction"] ? totalInvestment * (finance.taxCredit / 100) / finance.projectLife : 0;
+      const zebBenefit = finance.enabledPolicies["zero_energy"] ? totalInvestment * (finance.zebDiscount / 100) / finance.projectLife : 0;
+
+      const annualBenefit = annualSaving + annualSmpRevenue + annualRecRevenue + annualCo2Saving + annualFitRevenue + taxCreditBenefit + zebBenefit - annualOMCost;
+
+      let npv = -totalInvestment, payback = -1, cumCf = -totalInvestment;
+      const cashflows = [];
+      for (let y = 1; y <= finance.projectLife; y++) {
+        const cf = annualBenefit * Math.pow(1 + finance.inflation / 100, y - 1);
+        npv += cf / Math.pow(1 + finance.discountRate / 100, y);
+        cumCf += cf;
+        if (payback < 0 && cumCf >= 0) payback = y;
+        cashflows.push(Math.round(cf / 10000));
+      }
+      const bcr = (npv + totalInvestment) / totalInvestment;
+      let irrLow = -0.5, irrHigh = 5.0, irr = 0;
+      for (let i = 0; i < 50; i++) {
+        irr = (irrLow + irrHigh) / 2;
+        let nTest = -totalInvestment;
+        for (let y = 1; y <= finance.projectLife; y++) nTest += annualBenefit * Math.pow(1 + finance.inflation / 100, y - 1) / Math.pow(1 + irr, y);
+        if (nTest > 0) irrLow = irr; else irrHigh = irr;
+      }
+      const co2Reduction = totalAnnualGen * 0.4597;
+      const netZeroStatus = selfSufficiency >= 100 ? "달성" : selfSufficiency >= 80 ? "근접(80%↑)" : selfSufficiency >= 50 ? "진행중" : "미달성";
+      const monthlyPattern = [0.7, 0.75, 0.9, 1.0, 1.05, 1.1, 1.05, 1.1, 0.95, 0.85, 0.72, 0.68];
+      const monthlyGen = monthlyPattern.map(p => Math.round(totalAnnualGen * p / 12));
+      const monthlyDemand = [1.15, 1.1, 1.0, 0.9, 0.85, 1.05, 1.2, 1.15, 0.9, 0.9, 1.0, 1.1].map(p => Math.round(annualDemand * p / 12));
+
+      setResult({
+        selfSufficiency: selfSufficiency.toFixed(1), totalAnnualGen: Math.round(totalAnnualGen),
+        totalInvestment: Math.round(totalInvestment), npv: Math.round(npv / 10000),
+        irr: (irr * 100).toFixed(2), payback: payback > 0 ? payback : `>${finance.projectLife}`,
+        bcr: bcr.toFixed(2), annualSaving: Math.round(annualSaving / 10000),
+        annualBenefit: Math.round(annualBenefit / 10000), kepcoLifetimeCost: Math.round(kepcoLifetimeCost / 10000),
+        co2Reduction: Math.round(co2Reduction), netZeroStatus, sourceDetails, monthlyGen, monthlyDemand,
+        cashflows, surplus: Math.round(surplus), annualCo2Saving: Math.round(annualCo2Saving / 10000),
+        diagnosis: selfSufficiency >= 80 ? "우수" : selfSufficiency >= 50 ? "양호" : "개선필요",
+      });
+      setLoading(false);
+      setTab(4);
+    }, 800);
+  }, [sources, demand, finance]);
+
+  const months = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
+  const maxFar = zoneInfo.far ? Math.round(project.landArea * zoneInfo.far / 100) : 0;
+  const maxBcr = zoneInfo.bcr ? Math.round(project.landArea * zoneInfo.bcr / 100) : 0;
+
+  return (
+    <div style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", background: "#f1f5f9", minHeight: "100vh" }}>
+      <PolicyPopup policy={popup} onClose={() => setPopup(null)} />
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%)", color: "#fff", padding: "16px 16px 0" }}>
+        <div style={{ fontSize: 10, color: "#93c5fd", letterSpacing: 2, marginBottom: 3 }}>구도심 경제활성화 정책 대응</div>
+        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 12 }}>⚡ 신재생에너지 경제성 분석 시스템</div>
+        <div style={{ display: "flex", gap: 2, overflowX: "auto" }}>
+          {TABS.map((t, i) => (
+            <button key={i} onClick={() => setTab(i)} style={{
+              padding: "7px 11px", fontSize: 11, fontWeight: tab === i ? 800 : 500,
+              background: tab === i ? "#fff" : "transparent", color: tab === i ? "#1e3a5f" : "#93c5fd",
+              border: "none", borderRadius: "7px 7px 0 0", cursor: "pointer", whiteSpace: "nowrap",
+            }}>{i + 1}. {t}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: 14, maxWidth: 700, margin: "0 auto" }}>
+
+        {/* ===== TAB 0: 프로젝트 기본정보 ===== */}
+        {tab === 0 && (
+          <div>
+            <Card title="📋 프로젝트 기본정보" color="#1e3a5f">
+              <InputField label="프로젝트명" value={project.name} onChange={v => setP("name", v)} type="text" />
+              <InputField label="주소/지역" value={project.address} onChange={v => setP("address", v)} type="text" />
+            </Card>
+
+            <Card title="🗺️ 용도지역 선택 (국토계획법)" color="#0369a1">
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>용도지역</label>
+                <select value={project.zone} onChange={e => setP("zone", e.target.value)}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "8px 10px", borderRadius: 7, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#f8fafc" }}>
+                  {Object.entries(ZONE_REGULATIONS).map(([k, v]) => (
+                    <option key={k} value={k}>{k} — {v.desc}</option>
+                  ))}
+                </select>
+              </div>
+              {zoneInfo.bcr && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                  {[["건폐율", `최대 ${zoneInfo.bcr}%`, "#0369a1"], ["용적률", `최대 ${zoneInfo.far}%`, "#7c3aed"], ["설명", zoneInfo.desc, "#64748b"]].map(([l, v, c]) => (
+                    <div key={l} style={{ background: "#f0f9ff", borderRadius: 8, padding: 8, textAlign: "center" }}>
+                      <div style={{ fontSize: 10, color: "#64748b" }}>{l}</div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: c }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card title="🏗️ 건물 용도 및 규모" color="#059669">
+              {/* 주요 용도 선택 */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 6 }}>주요 건물 용도</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {Object.entries(BUILDING_TYPES).map(([k, v]) => (
+                    <button key={k} onClick={() => { setP("mainType", k); setP("subType", v.sub[0]); }}
+                      style={{ padding: "6px 12px", borderRadius: 20, border: `2px solid ${project.mainType === k ? "#059669" : "#e2e8f0"}`,
+                        background: project.mainType === k ? "#f0fdf4" : "#f8fafc", color: project.mainType === k ? "#059669" : "#64748b",
+                        fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{v.icon} {k}</button>
+                  ))}
+                </div>
+              </div>
+              {/* 세부 유형 */}
+              {typeInfo.sub && (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 6 }}>세부 용도 유형</label>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {typeInfo.sub.map(s => (
+                      <button key={s} onClick={() => setP("subType", s)}
+                        style={{ padding: "5px 10px", borderRadius: 16, border: `2px solid ${project.subType === s ? "#3b82f6" : "#e2e8f0"}`,
+                          background: project.subType === s ? "#eff6ff" : "#f8fafc", color: project.subType === s ? "#3b82f6" : "#64748b",
+                          fontWeight: 600, fontSize: 11, cursor: "pointer" }}>{s}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                <InputField label="대지면적" value={project.landArea} onChange={v => { setP("landArea", v); setP("totalArea", project.newArea + project.extArea); }} unit="m²" min={0} hint={`최대 건축면적: ${maxBcr.toLocaleString()}m²`} />
+                <InputField label="신축 연면적" value={project.newArea} onChange={v => { setP("newArea", v); setP("totalArea", v + project.extArea); }} unit="m²" min={0} hint={`최대 용적률적용: ${maxFar.toLocaleString()}m²`} />
+                <InputField label="증축 면적" value={project.extArea} onChange={v => { setP("extArea", v); setP("totalArea", project.newArea + v); }} unit="m²" min={0} />
+                <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                  <div style={{ fontSize: 10, color: "#64748b" }}>총 연면적 (신축+증축)</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#059669" }}>{project.totalArea.toLocaleString()} m²</div>
+                </div>
+                <InputField label="층수" value={project.floors} onChange={v => setP("floors", v)} unit="층" min={1} max={70} />
+                <InputField label="세대/호실 수" value={project.units} onChange={v => setP("units", v)} unit="세대/호" min={1} />
+              </div>
+              {/* 용도 다중 선택 */}
+              <div style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 6 }}>입주 용도 (복수 선택)</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {USAGE_TYPES.map(u => {
+                    const sel = project.usages.includes(u);
+                    return (
+                      <button key={u} onClick={() => setP("usages", sel ? project.usages.filter(x => x !== u) : [...project.usages, u])}
+                        style={{ padding: "4px 9px", borderRadius: 12, border: `1.5px solid ${sel ? "#7c3aed" : "#e2e8f0"}`,
+                          background: sel ? "#f5f3ff" : "#f8fafc", color: sel ? "#7c3aed" : "#64748b",
+                          fontWeight: 600, fontSize: 11, cursor: "pointer" }}>{u}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            </Card>
+
+            <button onClick={() => { estimateDemand(); setTab(1); }}
+              style={{ width: "100%", padding: 12, background: "#1e3a5f", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              수요 예측 후 다음 단계 →
+            </button>
+          </div>
+        )}
+
+        {/* ===== TAB 1: 수요 데이터 ===== */}
+        {tab === 1 && (
+          <div>
+            <Card title="📊 수요 예측 시나리오 선택" color="#0891b2">
+              <div style={{ fontSize: 12, color: "#0369a1", background: "#f0f9ff", borderRadius: 8, padding: 10, marginBottom: 12 }}>
+                💡 <strong>1단계 기본정보</strong>를 기반으로 수요량이 자동 산출되었습니다. 시나리오를 선택하거나 직접 수정하세요.
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 6 }}>수요 시나리오</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  {[["low", "보수적", "×0.8", "#64748b"], ["standard", "표준", "×1.0", "#0891b2"], ["high", "개발 후\n최대", "×1.25", "#dc2626"]].map(([v, l, m, c]) => (
+                    <button key={v} onClick={() => { setD("demandScenario", v); setDemandLocked(false); setTimeout(() => { estimateDemand(); setDemandLocked(true); }, 50); }}
+                      style={{ padding: "8px 6px", borderRadius: 8, border: `2px solid ${demand.demandScenario === v ? c : "#e2e8f0"}`,
+                        background: demand.demandScenario === v ? `${c}10` : "#f8fafc", color: demand.demandScenario === v ? c : "#64748b",
+                        fontWeight: 700, fontSize: 11, cursor: "pointer", textAlign: "center", lineHeight: 1.4 }}>
+                      {l}<br /><span style={{ fontSize: 10 }}>{m}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ background: "#fef3c7", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 11, color: "#92400e" }}>
+                📌 기준: <strong>{project.subType}</strong> · {project.totalArea.toLocaleString()}m² · <strong>{typeInfo.unitPower?.[project.subType] || "-"} kWh/m²·년</strong>
+              </div>
+            </Card>
+
+            <Card title="⚡ 에너지 수요량 (자동 예측 + 직접 수정)" color="#0891b2">
+              <InputField label="연간 전력 수요량" value={demand.annualKwh} onChange={v => setD("annualKwh", v)} unit="kWh/년"
+                hint={`세대당 약 ${project.units > 0 ? Math.round(demand.annualKwh / project.units).toLocaleString() : "-"} kWh/년`} />
+              <InputField label="피크 전력 수요" value={demand.peakKw} onChange={v => setD("peakKw", v)} unit="kW" />
+              <InputField label="연간 열 수요량 (냉난방·급탕)" value={demand.heatDemand} onChange={v => setD("heatDemand", v)} unit="kWh/년" />
+              <InputField label="연간 수요 증가율 (구도심 개발 반영)" value={demand.growthRate} onChange={v => setD("growthRate", v)} unit="%" min={0} max={20} step={0.1} />
+              <InputField label="한전 전력 요금 단가" value={demand.kepcoRate} onChange={v => setD("kepcoRate", v)} unit="원/kWh"
+                hint="주거:120 / 상업:140 / 산업:90원 기준" refVal={project.mainType === "주거" ? "120원" : project.mainType === "상업" ? "140원" : "110원"} />
+              <div style={{ background: "#fef9c3", borderRadius: 8, padding: 10, fontSize: 12, color: "#854d0e" }}>
+                📌 한전 전력 {finance.projectLife}년 단순 예상 비용: <strong>{Math.round(demand.annualKwh * demand.kepcoRate / 1000 * finance.projectLife / 10000).toLocaleString()}만원</strong>
+              </div>
+            </Card>
+
+            <button onClick={() => setTab(2)} style={{ width: "100%", padding: 12, background: "#0891b2", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>다음 단계 →</button>
+          </div>
+        )}
+
+        {/* ===== TAB 2: 에너지원 선택 ===== */}
+        {tab === 2 && (
+          <div>
+            <Card title="🌱 신재생에너지원 선택 및 설정" color="#059669">
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>적용할 에너지원을 선택하고 설치 용량과 비용을 설정하세요.</div>
+              {ENERGY_SOURCES.map(s => {
+                const cfg = sources[s.id];
+                return (
+                  <div key={s.id} style={{ border: `2px solid ${cfg.enabled ? (s.id === "battery" ? "#7c3aed" : "#10b981") : "#e2e8f0"}`, borderRadius: 10, padding: 12, marginBottom: 10, background: cfg.enabled ? (s.id === "battery" ? "#faf5ff" : "#f0fdf4") : "#f8fafc", transition: "all 0.2s" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: cfg.enabled ? 12 : 0 }}>
+                      <span style={{ fontSize: 22 }}>{s.icon}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{s.label}</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>수명 {s.lifespan}년 · {s.id === "battery" ? "충방전효율 92%" : `기본효율 ${s.defaultEff}`}</div>
+                      </div>
+                      <button onClick={() => setSrc(s.id, "enabled", !cfg.enabled)} style={{
+                        padding: "5px 12px", borderRadius: 20, border: "none", fontWeight: 700, fontSize: 11,
+                        background: cfg.enabled ? (s.id === "battery" ? "#7c3aed" : "#10b981") : "#e2e8f0",
+                        color: cfg.enabled ? "#fff" : "#64748b", cursor: "pointer"
+                      }}>{cfg.enabled ? "✓ 선택됨" : "선택"}</button>
+                    </div>
+                    {cfg.enabled && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <InputField label={`설치 용량 (${s.unit})`} value={cfg.capacity} onChange={v => setSrc(s.id, "capacity", v)} min={1} />
+                        <InputField label="단위 설치비 (원)" value={cfg.cost} onChange={v => setSrc(s.id, "cost", v)} unit="원" step={10000} />
+                        <div style={{ gridColumn: "1/-1", fontSize: 11, background: cfg.enabled ? (s.id === "battery" ? "#ede9fe" : "#dcfce7") : "#f0f9ff", borderRadius: 6, padding: "6px 10px", color: s.id === "battery" ? "#5b21b6" : "#166534" }}>
+                          💰 예상 투자비: <strong>{Math.round(cfg.capacity * cfg.cost * (1 - finance.subsidyRate / 100) / 10000).toLocaleString()}만원</strong> (보조금 {finance.subsidyRate}% 적용)
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+            <button onClick={() => setTab(3)} style={{ width: "100%", padding: 12, background: "#059669", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>다음 단계 →</button>
+          </div>
+        )}
+
+        {/* ===== TAB 3: 재무 설정 ===== */}
+        {tab === 3 && (
+          <div>
+            <Card title="📐 재무 기본 설정" color="#7c3aed">
+              <div style={{ background: "#faf5ff", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 11, color: "#6d28d9" }}>
+                💡 아래 참고값을 확인하고 직접 입력하세요.
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 6 }}>할인율 참고값 선택 →  직접 입력</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                  {DISCOUNT_RATE_REFS.map(r => (
+                    <button key={r.label} onClick={() => setF("discountRate", r.value)}
+                      style={{ padding: "4px 10px", borderRadius: 14, border: `1.5px solid ${finance.discountRate === r.value ? "#7c3aed" : "#e2e8f0"}`,
+                        background: finance.discountRate === r.value ? "#f5f3ff" : "#f8fafc", color: finance.discountRate === r.value ? "#7c3aed" : "#64748b",
+                        fontSize: 10, fontWeight: 600, cursor: "pointer" }}>
+                      {r.label} ({r.value}%)
+                    </button>
+                  ))}
+                </div>
+                <InputField label="할인율 (직접 입력)" value={finance.discountRate} onChange={v => setF("discountRate", v)} unit="%" step={0.1} refVal="공공사업 5.5% / 민간 6.5%" />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+                <InputField label="물가상승률" value={finance.inflation} onChange={v => setF("inflation", v)} unit="%" step={0.1} refVal="한국은행 목표 2.0%" />
+                <InputField label="사업기간" value={finance.projectLife} onChange={v => setF("projectLife", v)} unit="년" min={5} max={40} refVal="태양광 25년 권장" />
+                <InputField label="부채비율" value={finance.debtRatio} onChange={v => setF("debtRatio", v)} unit="%" max={100} refVal="통상 60~80%" />
+                <InputField label="부채이자율" value={finance.debtRate} onChange={v => setF("debtRate", v)} unit="%" step={0.1} refVal="시중은행 3~5%" />
+                <InputField label="O&M 비율 (투자비 대비)" value={finance.omRate} onChange={v => setF("omRate", v)} unit="%" step={0.1} refVal="태양광 1.0~1.5%" />
+                <InputField label="정부 투자보조금" value={finance.subsidyRate} onChange={v => setF("subsidyRate", v)} unit="%" max={80} refVal="그린뉴딜 20~40%" />
+              </div>
+            </Card>
+
+            <Card title="🏛️ 정부 지원 제도 적용" color="#0369a1">
+              <div style={{ fontSize: 11, color: "#0369a1", background: "#f0f9ff", borderRadius: 8, padding: 8, marginBottom: 12 }}>
+                제도명을 클릭하면 상세 내용을 확인할 수 있습니다. 적용 체크 후 수치를 입력하세요.
+              </div>
+              {SUPPORT_POLICIES.map(p => {
+                const enabled = !!finance.enabledPolicies[p.id];
+                return (
+                  <div key={p.id} style={{ border: `2px solid ${enabled ? "#0369a1" : "#e2e8f0"}`, borderRadius: 10, padding: 11, marginBottom: 10, background: enabled ? "#f0f9ff" : "#f8fafc" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input type="checkbox" checked={enabled}
+                        onChange={e => setF("enabledPolicies", { ...finance.enabledPolicies, [p.id]: e.target.checked })}
+                        style={{ width: 15, height: 15, cursor: "pointer" }} />
+                      <button onClick={() => setPopup(p)}
+                        style={{ flex: 1, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                        <span style={{ fontWeight: 800, fontSize: 13, color: "#0369a1", textDecoration: "underline", textDecorationStyle: "dotted" }}>{p.label}</span>
+                        <span style={{ fontSize: 11, color: "#64748b", marginLeft: 8 }}>{p.fullName}</span>
+                      </button>
+                      <span style={{ fontSize: 10, color: "#0369a1", background: "#dbeafe", borderRadius: 10, padding: "2px 7px", cursor: "pointer" }} onClick={() => setPopup(p)}>상세 ▶</span>
+                    </div>
+                    {enabled && (
+                      <div style={{ marginTop: 10 }}>
+                        <InputField label={p.inputLabel} value={finance[p.field] ?? p.defaultVal}
+                          onChange={v => setF(p.field, v)} unit={p.inputUnit} step={p.inputUnit === "%" ? 0.1 : p.inputUnit === "배" ? 0.1 : 100} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+
+            <button onClick={analyze} disabled={loading} style={{
+              width: "100%", padding: 14, background: loading ? "#94a3b8" : "linear-gradient(135deg, #7c3aed, #3b82f6)",
+              color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 15, cursor: loading ? "not-allowed" : "pointer"
+            }}>{loading ? "⏳ 분석 중..." : "🔍 경제성 분석 실행"}</button>
+          </div>
+        )}
+
+        {/* ===== TAB 4: 결과 ===== */}
+        {tab === 4 && result && (
+          <div>
+            <div style={{ background: `linear-gradient(135deg, ${result.diagnosis === "우수" ? "#059669,#10b981" : result.diagnosis === "양호" ? "#0891b2,#06b6d4" : "#dc2626,#ef4444"})`, borderRadius: 12, padding: 16, marginBottom: 14, color: "#fff" }}>
+              <div style={{ fontSize: 11, opacity: 0.85 }}>종합 경제성 진단</div>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{result.diagnosis === "우수" ? "✅" : result.diagnosis === "양호" ? "🔵" : "⚠️"} {result.diagnosis}</div>
+              <div style={{ fontSize: 12, opacity: 0.9 }}>자급률 {result.selfSufficiency}% · 넷제로 {result.netZeroStatus}</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+              <ResultMetric label="NPV(순현재가치)" value={result.npv > 0 ? `+${result.npv.toLocaleString()}` : result.npv.toLocaleString()} unit="만원" color={result.npv > 0 ? "#059669" : "#dc2626"} />
+              <ResultMetric label="IRR(내부수익률)" value={`${result.irr}%`} unit="" color={parseFloat(result.irr) > finance.discountRate ? "#059669" : "#dc2626"} sub={parseFloat(result.irr) > finance.discountRate ? "투자적합" : "재검토"} />
+              <ResultMetric label="투자회수기간" value={result.payback} unit="년" color="#0891b2" />
+              <ResultMetric label="BCR(비용편익비율)" value={result.bcr} unit="배" color={parseFloat(result.bcr) > 1 ? "#059669" : "#dc2626"} sub={parseFloat(result.bcr) > 1 ? "경제성 있음" : "낮음"} />
+            </div>
+
+            <Card title="⚡ 에너지 공급 현황" color="#0891b2">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                {[["연간 발전량", `${result.totalAnnualGen.toLocaleString()}`, "kWh/년", "#0891b2"], ["자급률", `${result.selfSufficiency}%`, "수요 대비", "#059669"], ["잉여 전력", `${result.surplus.toLocaleString()}`, "kWh/년", "#d97706"]].map(([l, v, u, c]) => (
+                  <div key={l} style={{ textAlign: "center", background: "#f8fafc", borderRadius: 8, padding: 8 }}>
+                    <div style={{ fontSize: 10, color: "#64748b" }}>{l}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: c }}>{v}</div>
+                    <div style={{ fontSize: 10, color: "#94a3b8" }}>{u}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 6 }}>월별 발전량 vs 수요</div>
+              <div style={{ overflowX: "auto" }}>
+                <div style={{ display: "flex", gap: 3, minWidth: 520 }}>
+                  {months.map((m, i) => {
+                    const mx = Math.max(...result.monthlyGen, ...result.monthlyDemand);
+                    return (
+                      <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                        <div style={{ height: 70, display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 1 }}>
+                          <div style={{ width: 11, height: `${(result.monthlyGen[i] / mx) * 70}px`, background: "#10b981", borderRadius: "2px 2px 0 0" }} />
+                          <div style={{ width: 11, height: `${(result.monthlyDemand[i] / mx) * 70}px`, background: "#3b82f6", borderRadius: "2px 2px 0 0", opacity: 0.7 }} />
+                        </div>
+                        <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>{m}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 6, fontSize: 10 }}>
+                  <span><span style={{ display: "inline-block", width: 9, height: 9, background: "#10b981", borderRadius: 2, marginRight: 3 }} />발전량</span>
+                  <span><span style={{ display: "inline-block", width: 9, height: 9, background: "#3b82f6", opacity: 0.7, borderRadius: 2, marginRight: 3 }} />수요</span>
+                </div>
+              </div>
+            </Card>
+
+            {result.sourceDetails.length > 0 && (
+              <Card title="🌱 에너지원별 기여도" color="#059669">
+                <BarChart data={result.sourceDetails.map(s => ({ label: `${s.icon} ${s.name}`, value: s.annualGen, unit: " kWh" }))} title="연간 발전량" color="#10b981" />
+                <div style={{ height: 10 }} />
+                <BarChart data={result.sourceDetails.map(s => ({ label: `${s.icon} ${s.name}`, value: Math.round(s.investCost / 10000), unit: "만원" }))} title="에너지원별 투자비" color="#f59e0b" />
+              </Card>
+            )}
+
+            <Card title="💰 경제성 상세" color="#7c3aed">
+              {[
+                ["신재생 총 투자비 (보조금 후)", `${Math.round(result.totalInvestment / 10000).toLocaleString()}만원`, "#334155"],
+                [`한전 전력 ${finance.projectLife}년 현재가치 비용`, `${result.kepcoLifetimeCost.toLocaleString()}만원`, "#dc2626"],
+                ["연간 전력비 절감 편익", `+${result.annualSaving.toLocaleString()}만원`, "#059669"],
+                ["연간 CO₂ 감축 편익", `+${result.annualCo2Saving.toLocaleString()}만원`, "#059669"],
+                ["연간 순편익 합계", `${result.annualBenefit > 0 ? "+" : ""}${result.annualBenefit.toLocaleString()}만원`, result.annualBenefit > 0 ? "#059669" : "#dc2626"],
+              ].map(([l, v, c]) => (
+                <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #f1f5f9", fontSize: 12 }}>
+                  <span style={{ color: "#64748b" }}>{l}</span><span style={{ fontWeight: 700, color: c }}>{v}</span>
+                </div>
+              ))}
+              <div style={{ height: 12 }} />
+              <BarChart data={result.cashflows.map((v, i) => ({ label: `${i + 1}년`, value: v, unit: "만" }))} title="연도별 현금흐름 (만원)" color="#7c3aed" />
+            </Card>
+
+            <Card title="🌍 환경 편익 및 넷제로" color="#0d9488">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <ResultMetric label="연간 CO₂ 감축량" value={result.co2Reduction.toLocaleString()} unit="tCO₂/년" color="#0d9488" />
+                <ResultMetric label="넷제로 달성" value={result.netZeroStatus} unit="" color={result.netZeroStatus === "달성" ? "#059669" : "#0891b2"} />
+              </div>
+              <div style={{ marginTop: 12, background: "#f0fdfa", borderRadius: 8, padding: 10, fontSize: 11, color: "#0f766e" }}>
+                {finance.projectLife}년 누적 CO₂ 감축: <strong>{(result.co2Reduction * finance.projectLife).toLocaleString()} tCO₂</strong> · 소나무 {Math.round(result.co2Reduction * 152).toLocaleString()}그루/년 효과
+              </div>
+            </Card>
+
+            <button onClick={() => { setResult(null); setTab(0); }} style={{ width: "100%", padding: 12, background: "#1e3a5f", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              🔄 새로운 분석 시작
+            </button>
+          </div>
+        )}
+
+        {tab === 4 && !result && (
+          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8" }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>분석 결과가 없습니다.</div>
+            <div style={{ fontSize: 12, marginTop: 6 }}>1~4단계 입력 후 분석을 실행해주세요.</div>
+            <button onClick={() => setTab(0)} style={{ marginTop: 16, padding: "9px 20px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>입력 시작하기</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
